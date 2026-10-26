@@ -2,6 +2,8 @@
 
 ARS reads one of your projects, learns how **you** write code, packages that as [Claude Code skills](https://docs.claude.com/en/docs/claude-code/skills), and then **proves** on tasks it has never seen that a coding agent with those skills writes like you.
 
+ARS currently supports **React projects written in TypeScript or JavaScript**. Other stacks (Python, Go, etc.) aren't supported yet.
+
 Skill generation is only the first step. The point is the feedback loop: every rule carries evidence from your code, can be checked automatically, is tested on unseen tasks against controls, and is improved only when the data says the change helps.
 
 ![The ARS workspace: a profile's pipeline rail and its learned signature](docs/images/signature.png)
@@ -50,7 +52,7 @@ Claude is optional for analysis but required for agent runs and some rules. See 
 
 ## Scope
 
-- Deep analysis covers **TypeScript, JavaScript and React**. Other languages get a stack-neutral inventory (languages, manifests, frameworks, imports) and are marked as shallow coverage. New analyzers plug in by emitting the same observations; see [Extending ARS](docs/extending.md).
+- **Supported today: React projects (TypeScript or JavaScript).** You can point ARS at other repositories, but it will learn little from them, and the Lab's tasks are React apps. Other languages are on the roadmap; see [Extending ARS](docs/extending.md) to add one.
 - Private repositories clone with your machine's own git credentials. ARS never stores tokens, keeps all data in `./data`, and sends only redacted excerpts to Claude. See [Security](SECURITY.md).
 
 ## Roadmap

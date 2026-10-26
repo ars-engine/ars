@@ -53,7 +53,9 @@ Set a monthly spend limit in the Console before running Lab experiments. See [Co
 
 ## 3. Analyze your first project
 
-On the home page, paste either:
+ARS supports **React projects written in TypeScript or JavaScript**. Other stacks, such as Python or Go, aren't supported yet.
+
+On the home page, paste either of these for a React project:
 
 - a Git URL, such as `https://github.com/you/app.git`. Private repositories clone with your machine's own git credentials.
 - a local folder, such as `/Users/you/code/app`. ARS reads it and never writes to it.
