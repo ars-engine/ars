@@ -53,6 +53,12 @@ Claude is optional for analysis but required for agent runs and some rules. See 
 - Deep analysis covers **TypeScript, JavaScript and React**. Other languages get a stack-neutral inventory (languages, manifests, frameworks, imports) and are marked as shallow coverage. New analyzers plug in by emitting the same observations; see [Extending ARS](docs/extending.md).
 - Private repositories clone with your machine's own git credentials. ARS never stores tokens, keeps all data in `./data`, and sends only redacted excerpts to Claude. See [Security](SECURITY.md).
 
+## Roadmap
+
+- **More coding agents:** Codex and others, alongside Claude Code, compared side by side in the same Lab.
+- **More languages** with deep analysis beyond TypeScript, JavaScript and React.
+- **Automated tests and CI.**
+
 ## License
 
 [Apache-2.0](LICENSE)
