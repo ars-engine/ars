@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "ars-api", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--workspace", "@ars/server"], "port": 4317 },
+    { "name": "ars-web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--workspace", "@ars/web"], "port": 5317 }
+  ]
+}

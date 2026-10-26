@@ -1,0 +1,14 @@
+{
+  "name": "@ars/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "NODE_ENV=production tsx src/main.ts"
+  },
+  "dependencies": {
+    "@ars/engine": "*",
+    "@hono/node-server": "^1.19.0",
+    "hono": "^4.13.13"
+  }
+}

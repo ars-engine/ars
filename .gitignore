@@ -147,3 +147,9 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# ARS: local state (profiles, cloned repos, runs) — never commit
+data
+
+# macOS
+.DS_Store

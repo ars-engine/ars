@@ -1,0 +1,18 @@
+{
+  "name": "ars",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @ars/server & npm run dev --workspace @ars/web & wait",
+    "start": "npm run build --workspace @ars/web && npm run start --workspace @ars/server",
+    "typecheck": "tsc -p packages/engine && tsc -p packages/server && tsc -p packages/web",
+    "ars": "tsx packages/engine/src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
