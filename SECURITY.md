@@ -6,9 +6,29 @@ ARS reads source code that may be private, so it's built to keep that code on yo
 
 - **All state** lives in `ARS_DATA` (default `./data`, which git ignores): the database, cloned repositories, analysis facts, skill packages, run workspaces and agent transcripts.
 - **Analysis is local.** Ingest, AST mining, formatting inference, self-tests, review, skill generation, the edit hook and `ars check` make no network calls.
-- **Git credentials are never stored.** Private repositories clone with your machine's own git setup (SSH keys or a credential helper). ARS never asks for or saves tokens.
+- **Git credentials are never stored.** Private repositories clone with your machine's own git setup (SSH keys or a credential helper). ARS never asks for or saves tokens, and it refuses URLs with credentials in them.
 - **Local folders are read, never written.** Only `ars install` writes into a project, and only the files listed in [CLI and hook](docs/cli.md#ars-install).
-- The API listens on `127.0.0.1` only.
+
+## Analyzing code you don't trust
+
+Analysis treats the repository as data:
+
+- **No code from the repository runs.** Prettier configs are read as JSON, YAML or TOML, and only the formatting options ARS learns are kept. JavaScript configs, shared configs and plugins are ignored. ARS never runs the repository's `package.json` scripts.
+- **Only regular files inside the repository are read.** Symlinks, FIFOs and devices are skipped, and file routes resolve symlinks before checking that a path stays inside its folder.
+- **Git runs with hostile settings turned off.** `core.fsmonitor` and `core.hooksPath` are overridden, the `ext::` transport is disabled, and sources starting with `-` are refused.
+- **Agent configuration is never copied.** `.claude/`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and `.mcp.json` are skipped during ingest.
+
+Generated skills still contain text derived from the repository: exemplar files and the Claude-written style dossier. The skills tell the agent to treat both as style references only, but a crafted repository could still try to steer an agent through them. Read a package's exemplars and voice skill before installing it from a repository you don't trust.
+
+## The local API
+
+The API listens on `127.0.0.1` only, and accepts requests only from the ARS UI:
+
+- every request needs a random session token that changes each time the server starts;
+- the `Host` header must be `localhost`, `127.0.0.1` or `[::1]`, which blocks DNS rebinding;
+- requests from other websites' origins are refused, and writes must be `application/json`.
+
+Any page served from a localhost port is trusted, so don't run untrusted local web apps alongside ARS.
 
 ## What can be sent to Anthropic
 
@@ -38,12 +58,20 @@ Redaction is pattern-based and can miss things. Agent runs read workspace files 
 
 ## Agent permissions
 
-Benchmark agents run with `permissionMode: 'bypassPermissions'` so they can work without prompts. That's acceptable only because:
+Benchmark agents run without permission prompts, and their workspaces contain untrusted text: T1 workspaces are a copy of the analyzed repository, and T2 workspaces contain exemplars from it. To limit what a steered agent can do:
 
-- each run has its own throwaway folder under `data/runs/`, and
-- agents load only that folder's `.claude/` settings (`settingSources: ['project']`), never your personal Claude Code configuration.
+- each run has its own throwaway folder under `data/runs/`;
+- agents load only that folder's `.claude/` settings (`settingSources: ['project']`), never your personal Claude Code configuration, and no MCP servers;
+- `Read`, `Write`, `Edit`, `Glob` and `Grep` are refused for any path outside the workspace;
+- `Bash` (T2 only) runs in Claude Code's OS sandbox, which confines writes to the workspace and temporary folders;
+- agents get a minimal environment: `PATH`, `HOME`, locale, proxy settings and Claude credentials, not the rest of your shell.
 
-Agents in T2 runs have `Bash`, which runs as your user. The working folder is isolated, but this isn't an OS-level sandbox, so a misbehaving agent could still touch files elsewhere. Run benchmarks on a machine where that's acceptable, or inside a container or VM.
+What remains:
+
+- **The agent can see your Claude credentials.** It needs them to run. Use a separate API key with a low spend limit for Lab experiments.
+- **T2 scoring runs agent-written code outside the sandbox.** ARS runs the workspace's acceptance tests (`vitest`) and `tsc` to score a run, and the tests execute the code the agent wrote.
+
+Run Lab experiments on repositories you don't trust inside a container or VM.
 
 ## Installed hooks
 

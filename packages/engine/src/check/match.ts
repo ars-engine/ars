@@ -14,6 +14,21 @@ export function matchesFeature(check: Extract<Check, { type: 'feature' }>, value
   }
 }
 
+/**
+ * Compile a pattern rule's regex. The regex comes from LLM output, which repo text can steer, and
+ * runs on the server's event loop, so refuse long patterns and nested quantifiers such as (a+)+
+ * that can backtrack for minutes. Returns undefined for anything refused or invalid.
+ */
+export function patternRegex(source: string): RegExp | undefined {
+  if (source.length > 300) return undefined;
+  if (/\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)[+*{]/.test(source) || /\\\d/.test(source)) return undefined;
+  try {
+    return new RegExp(source, 'm');
+  } catch {
+    return undefined;
+  }
+}
+
 /** True when the sequence never places a later canonical step before an earlier one. */
 export function respectsOrder(seq: string[], canonical: string[]): boolean {
   const ranks = seq.map((s) => canonical.indexOf(s)).filter((r) => r >= 0);

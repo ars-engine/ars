@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { Job } from '@ars/engine';
-import { api, useApi } from './api';
+import { api, openStream, useApi } from './api';
 import { Badge, Bar, Spinner } from './ui';
 
 /** Live job streaming (server-sent events) and the global job tray. */
@@ -11,17 +11,14 @@ export function useJob(jobId?: string | null): Job | undefined {
   const qc = useQueryClient();
   useEffect(() => {
     if (!jobId) return;
-    const es = new EventSource(`/api/jobs/${jobId}/stream`);
-    es.addEventListener('job', (e) => {
-      const next = JSON.parse((e as MessageEvent).data) as Job;
+    return openStream(`/jobs/${jobId}/stream`, (data, close) => {
+      const next = JSON.parse(data) as Job;
       setJob(next);
       if (next.status !== 'running') {
-        es.close();
+        close();
         void qc.invalidateQueries();
       }
     });
-    es.onerror = () => es.close();
-    return () => es.close();
   }, [jobId, qc]);
   return job;
 }
@@ -56,12 +53,10 @@ export function JobTray() {
   const jobs = useApi<Job[]>('/jobs', { refetchInterval: 4000 });
   const qc = useQueryClient();
   useEffect(() => {
-    const es = new EventSource('/api/events');
-    es.addEventListener('job', (e) => {
-      const job = JSON.parse((e as MessageEvent).data) as Job;
+    return openStream('/events', (data) => {
+      const job = JSON.parse(data) as Job;
       if (job.status !== 'running') void qc.invalidateQueries();
-    });
-    return () => es.close();
+    }, true);
   }, [qc]);
   const running = (jobs.data ?? []).filter((j) => j.status === 'running');
   return (

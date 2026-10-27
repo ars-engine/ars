@@ -3,7 +3,7 @@ import { groupBy, mean } from '../core/util.ts';
 import { isFormattable, isFormatted } from '../analyzers/format.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { matchesFeature } from './match.ts';
+import { matchesFeature, patternRegex } from './match.ts';
 
 export interface CheckOptions {
   /** Only evaluate these files (e.g. the files an agent wrote). */
@@ -52,10 +52,11 @@ export async function checkConventions(conventions: Convention[], analysis: Anal
         tally(!used.length, { file: 'package.json', line: 1, value: used.join(', ') || check.lib });
       }
     } else if (check.type === 'pattern') {
-      const re = new RegExp(check.regex, 'm');
-      for (const f of analysis.files) {
+      // Also guards rules.json files that were generated before patterns were vetted.
+      const re = patternRegex(check.regex);
+      for (const f of re ? analysis.files : []) {
         if ((check.role && f.role !== check.role) || !inScope(f.path) || exempt.has(f.path) || !/\.[jt]sx?$/.test(f.path)) continue;
-        const present = re.test(read(f.path));
+        const present = re!.test(read(f.path));
         tally(check.expect === 'present' ? present : !present, { file: f.path, line: 1 });
       }
     }

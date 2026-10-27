@@ -3,7 +3,7 @@ export * from './core/types.ts';
 export * from './core/entities.ts';
 export { get, list, mustGet, put, update } from './core/store.ts';
 export { facts } from './core/factsCache.ts';
-export { DATA_DIR } from './core/paths.ts';
+export { DATA_DIR, resolveInside } from './core/paths.ts';
 export { describeFormatting } from './analyzers/format.ts';
 export { FEATURE_MAP } from './mine/features.ts';
 export { LAYERS } from './core/types.ts';

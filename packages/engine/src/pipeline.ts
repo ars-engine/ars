@@ -1,12 +1,11 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import type {
   AnalysisDoc, ConventionSet, Decision, Experiment, HeldOutFile, Profile, Proposal, SkillVersion, StyleChange,
 } from './core/entities.ts';
 import { DEFAULT_THRESHOLDS } from './core/entities.ts';
 import { facts } from './core/factsCache.ts';
-import { dataPath } from './core/paths.ts';
+import { dataPath, resolveInside } from './core/paths.ts';
 import { get, list, mustGet, put, update } from './core/store.ts';
 import type { Analysis, Convention, Layer, Role } from './core/types.ts';
 import { countBy, newId, slug } from './core/util.ts';
@@ -14,7 +13,7 @@ import { analyzeDirectory } from './analyzers/index.ts';
 import { inferFormatting } from './analyzers/format.ts';
 import { saveFacts } from './core/facts.ts';
 import { selfTest } from './check/selftest.ts';
-import { cloneRepo, headSha, isRemoteSource } from './ingest/git.ts';
+import { checkSource, cloneRepo, headSha, isRemoteSource, pullRepo } from './ingest/git.ts';
 import { ingest } from './ingest/ingest.ts';
 import { startJob, type JobContext } from './jobs.ts';
 import { AGENT_MODEL, llmConfigured } from './llm/claude.ts';
@@ -28,6 +27,7 @@ import { generateSkillPackage } from './skills/generate.ts';
 
 export function createProfile(source: string, name?: string): { profile: Profile; jobId: string } {
   const trimmed = source.trim();
+  checkSource(trimmed);
   const remote = isRemoteSource(trimmed);
   if (!remote && !existsSync(resolve(trimmed))) throw new Error(`Folder not found: ${trimmed}`);
   const id = newId('prof');
@@ -58,8 +58,8 @@ export function currentConventions(profile: Profile): Convention[] {
 }
 
 export function readSource(profile: Profile, path: string): string {
-  const abs = join(profile.repoDir, path);
-  if (!abs.startsWith(profile.repoDir) || !existsSync(abs)) throw new Error(`File not in repository: ${path}`);
+  const abs = resolveInside(profile.repoDir, path);
+  if (!abs || !statSync(abs).isFile()) throw new Error(`File not in repository: ${path}`);
   return readFileSync(abs, 'utf8');
 }
 
@@ -121,7 +121,7 @@ function syncRepository(profile: Profile, ctx: JobContext) {
   } else {
     ctx.log('Pulling latest commits…');
     try {
-      execFileSync('git', ['pull', '--ff-only'], { cwd: profile.repoDir, stdio: 'pipe' });
+      pullRepo(profile.repoDir);
     } catch (err) {
       ctx.log(`git pull failed, analyzing the existing checkout: ${(err as Error).message.split('\n')[0]}`);
     }
