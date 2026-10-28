@@ -2,7 +2,7 @@ import { z } from 'zod/v4';
 import type { Analysis, Convention, Layer, Role } from '../core/types.ts';
 import { slug } from '../core/util.ts';
 import { redact } from '../ingest/secrets.ts';
-import { patternRegex } from '../check/match.ts';
+import { patternRegex, testPattern } from '../check/match.ts';
 import { askJson } from '../llm/claude.ts';
 import { buildConvention } from './miner.ts';
 
@@ -78,7 +78,9 @@ export async function deepRead(
       const re = patternRegex(p.regex);
       if (!re) continue;
       const scope = analysis.files.filter((f) => (!p.role || f.role === p.role) && /\.[jt]sx?$/.test(f.path) && !heldOut.has(f.path));
-      const obs = scope.map((f) => ({ feature: id, value: re.test(texts.get(f.path) ?? '') ? 'present' : 'absent', file: f.path, line: 1, role: f.role }));
+      const results = scope.map((f) => testPattern(re, texts.get(f.path) ?? ''));
+      if (results.includes(undefined)) continue;
+      const obs = scope.map((f, i) => ({ feature: id, value: results[i] ? 'present' : 'absent', file: f.path, line: 1, role: f.role }));
       const matched = obs.filter((o) => o.value === p.expect);
       if (obs.length < 3 || matched.length / obs.length < 0.6) continue;
       conventions.push({

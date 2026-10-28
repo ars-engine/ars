@@ -3,7 +3,7 @@ import { groupBy, mean } from '../core/util.ts';
 import { isFormattable, isFormatted } from '../analyzers/format.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { matchesFeature, patternRegex } from './match.ts';
+import { matchesFeature, patternRegex, testPattern } from './match.ts';
 
 export interface CheckOptions {
   /** Only evaluate these files (e.g. the files an agent wrote). */
@@ -56,7 +56,12 @@ export async function checkConventions(conventions: Convention[], analysis: Anal
       const re = patternRegex(check.regex);
       for (const f of re ? analysis.files : []) {
         if ((check.role && f.role !== check.role) || !inScope(f.path) || exempt.has(f.path) || !/\.[jt]sx?$/.test(f.path)) continue;
-        const present = re!.test(read(f.path));
+        const present = testPattern(re!, read(f.path));
+        if (present === undefined) {
+          // Too slow to evaluate safely: treat the rule as not applicable rather than block the checker.
+          total = passed = violations.length = 0;
+          break;
+        }
         tally(check.expect === 'present' ? present : !present, { file: f.path, line: 1 });
       }
     }

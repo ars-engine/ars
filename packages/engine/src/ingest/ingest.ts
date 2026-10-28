@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
-import { gitFiles, isGitRepo } from './git.ts';
+import ignore, { type Ignore } from 'ignore';
+import { resolveInside } from '../core/paths.ts';
 import { findSecrets, type SecretHit } from './secrets.ts';
 
 /** Directories and files that never describe how a developer writes code. */
@@ -34,11 +35,41 @@ export interface IngestResult {
   secrets: SecretHit[];
 }
 
-function walk(root: string, dir = root, out: string[] = []): string[] {
+/** A small regular file's text, or undefined. Used for ignore files, which may be symlinks. */
+function readSmallFile(abs: string): string | undefined {
+  try {
+    const stat = lstatSync(abs);
+    return stat.isFile() && stat.size <= MAX_BYTES ? readFileSync(abs, 'utf8') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+interface IgnoreRules {
+  /** Folder the rules apply to, relative to the root ('' for the root). */
+  base: string;
+  rules: Ignore;
+}
+
+const isIgnored = (rules: IgnoreRules[], path: string, isDir: boolean) =>
+  rules.some(({ base, rules: r }) => {
+    const rel = base ? path.slice(base.length + 1) : path;
+    return rel !== '' && r.ignores(isDir ? `${rel}/` : rel);
+  });
+
+/**
+ * List files without running git, honouring every .gitignore and .git/info/exclude. Symlinked
+ * folders are listed as entries, never entered.
+ */
+function walk(root: string, dir = root, rules: IgnoreRules[] = [], out: string[] = []): string[] {
+  const base = relative(root, dir).split('\\').join('/');
+  const local = [base ? '' : readSmallFile(join(root, '.git', 'info', 'exclude')), readSmallFile(join(dir, '.gitignore'))].filter(Boolean);
+  const scoped = local.length ? [...rules, { base, rules: ignore().add(local.join('\n')) }] : rules;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walk(root, join(dir, entry.name), out);
-    } else out.push(relative(root, join(dir, entry.name)));
+      if (!SKIP_DIRS.has(entry.name) && !isIgnored(scoped, path, true)) walk(root, join(dir, entry.name), scoped, out);
+    } else if (!isIgnored(scoped, path, false)) out.push(path);
   }
   return out;
 }
@@ -87,7 +118,7 @@ function summarizeSkips(items: { path: string; reason: string }[]): SkipRecord[]
 export function ingest(rootInput: string): IngestResult {
   const root = resolve(rootInput);
   if (!existsSync(root)) throw new Error(`Folder not found: ${root}`);
-  const candidates = isGitRepo(root) ? gitFiles(root) : walk(root);
+  const candidates = walk(root);
   const files: string[] = [];
   const texts = new Map<string, string>();
   const skipped: { path: string; reason: string }[] = [];
@@ -97,11 +128,13 @@ export function ingest(rootInput: string): IngestResult {
     const abs = join(root, path);
     if (!lexists(abs)) continue;
     const reason = files.length >= MAX_FILES || totalBytes > MAX_TOTAL_BYTES ? 'over the repository size limit' : skipReason(path, abs);
-    if (reason) {
-      skipped.push({ path, reason });
+    // lstat only checks the last component; a symlinked parent folder could still lead outside.
+    const real = reason ? undefined : resolveInside(root, path);
+    if (reason || !real) {
+      skipped.push({ path, reason: reason ?? 'outside the repository (symlinked folder)' });
       continue;
     }
-    const text = readFileSync(abs, 'utf8');
+    const text = readFileSync(real, 'utf8');
     totalBytes += text.length;
     if (isGenerated(text)) {
       skipped.push({ path, reason: 'generated code' });

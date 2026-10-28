@@ -1,12 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { dataPath } from '../core/paths.ts';
 
 /**
- * A local folder's .git/config is untrusted: settings such as core.fsmonitor or core.hooksPath run
- * commands. Override them on every call, and never allow the ext:: transport.
+ * Git only ever runs to clone or pull ARS's own checkout of a Git URL. A folder's .git/config is
+ * untrusted (core.fsmonitor, gpg.program, hooks and more run commands, and a blocklist of keys keeps
+ * missing some), so analyzed folders are read without starting git inside them: HEAD is read as a
+ * file, and history comes from a fresh repository that borrows only the folder's object store.
  */
-const SAFE_CONFIG = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'protocol.ext.allow=never'];
+const SAFE_CONFIG = [
+  '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'protocol.ext.allow=never', '-c', 'log.showSignature=false',
+];
 
 const git = (cwd: string, args: string[]) =>
   execFileSync('git', [...SAFE_CONFIG, ...args], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -33,27 +38,73 @@ export function pullRepo(dir: string): void {
   git(dir, ['pull', '--ff-only']);
 }
 
-export function headSha(dir: string): string {
+/** A small regular file under .git, or undefined. Never follows a symlink. */
+function readGitFile(gitDir: string, rel: string): string | undefined {
   try {
-    return git(dir, ['rev-parse', 'HEAD']).trim();
+    const path = join(gitDir, rel);
+    const stat = lstatSync(path);
+    return stat.isFile() && stat.size <= 1_000_000 ? readFileSync(path, 'utf8') : undefined;
   } catch {
-    return 'working-tree';
+    return undefined;
   }
 }
 
-/** Tracked + untracked-but-not-ignored files, honouring every .gitignore. */
-export function gitFiles(dir: string): string[] {
-  return git(dir, ['ls-files', '--cached', '--others', '--exclude-standard']).split('\n').filter(Boolean);
+/** The real .git directory of a folder (not a worktree's .git file), or undefined. */
+function gitDirOf(dir: string): string | undefined {
+  try {
+    const gitDir = join(dir, '.git');
+    return lstatSync(gitDir).isDirectory() ? gitDir : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-/** path -> { lastTouched (unix seconds), commits } from a single `git log` pass. */
+const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/** HEAD's commit, read from .git as plain files. */
+export function readHead(dir: string): string | undefined {
+  const gitDir = gitDirOf(dir);
+  const head = gitDir && readGitFile(gitDir, 'HEAD')?.trim();
+  if (!gitDir || !head) return undefined;
+  if (SHA.test(head)) return head;
+  const ref = head.match(/^ref: (refs\/[\w./-]+)$/)?.[1];
+  if (!ref || ref.split('/').includes('..')) return undefined;
+  const loose = readGitFile(gitDir, ref)?.trim();
+  if (loose && SHA.test(loose)) return loose;
+  for (const line of readGitFile(gitDir, 'packed-refs')?.split('\n') ?? []) {
+    const [sha, name] = line.split(' ');
+    if (name === ref && SHA.test(sha)) return sha;
+  }
+  return undefined;
+}
+
+export const headSha = (dir: string) => readHead(dir) ?? 'working-tree';
+
+/**
+ * path -> { lastTouched (unix seconds), commits } from a single `git log` pass. Git runs in an empty
+ * bare repository that ARS creates, pointed at the folder's objects through objects/info/alternates,
+ * so the folder's config, hooks and attributes are never read.
+ */
 export function fileHistory(dir: string): Map<string, { lastTouched: number; commits: number }> {
   const history = new Map<string, { lastTouched: number; commits: number }>();
+  const gitDir = gitDirOf(dir);
+  const sha = readHead(dir);
+  if (!gitDir || !sha) return history;
+  let tmp: string | undefined;
   let out = '';
   try {
-    out = git(dir, ['log', '--format=@@%ct', '--name-only', '--no-renames']);
+    const objects = realpathSync(join(gitDir, 'objects'));
+    if (!statSync(objects).isDirectory() || /[\r\n]/.test(objects)) return history;
+    tmp = mkdtempSync(dataPath('tmp', 'history-'));
+    execFileSync('git', ['init', '--quiet', '--bare', tmp], { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'] });
+    writeFileSync(join(tmp, 'objects', 'info', 'alternates'), `${objects}\n`);
+    const shallow = readGitFile(gitDir, 'shallow');
+    if (shallow && shallow.split('\n').every((l) => !l || SHA.test(l))) writeFileSync(join(tmp, 'shallow'), shallow);
+    out = git(tmp, ['--git-dir', tmp, 'log', '--no-show-signature', '--format=@@%ct', '--name-only', '--no-renames', sha, '--']);
   } catch {
     return history;
+  } finally {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
   }
   let ts = 0;
   for (const line of out.split('\n')) {

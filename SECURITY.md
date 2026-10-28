@@ -14,8 +14,9 @@ ARS reads source code that may be private, so it's built to keep that code on yo
 Analysis treats the repository as data:
 
 - **No code from the repository runs.** Prettier configs are read as JSON, YAML or TOML, and only the formatting options ARS learns are kept. JavaScript configs, shared configs and plugins are ignored. ARS never runs the repository's `package.json` scripts.
-- **Only regular files inside the repository are read.** Symlinks, FIFOs and devices are skipped, and file routes resolve symlinks before checking that a path stays inside its folder.
-- **Git runs with hostile settings turned off.** `core.fsmonitor` and `core.hooksPath` are overridden, the `ext::` transport is disabled, and sources starting with `-` are refused.
+- **Only regular files inside the repository are read.** Symlinks, FIFOs and devices are skipped, and every file's real path, with symlinked folders resolved, must stay inside the repository.
+- **Git never runs inside an analyzed folder.** A repository's `.git/config` can make git run commands (`core.fsmonitor`, `gpg.program` and others). So ARS lists files itself, honouring `.gitignore`, and reads `HEAD` as a file. It reads history through an empty repository that it creates, which borrows only the folder's object store, so the folder's config and hooks are never read. Git itself runs only to clone or pull a Git URL, with the `ext::` transport disabled, and sources starting with `-` are refused.
+- **Pattern rules run with a time limit.** Regexes suggested by Claude are vetted, and every match runs under a 50 ms limit; a rule that hits it is dropped.
 - **Agent configuration is never copied.** `.claude/`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and `.mcp.json` are skipped during ingest.
 
 Generated skills still contain text derived from the repository: exemplar files and the Claude-written style dossier. The skills tell the agent to treat both as style references only, but a crafted repository could still try to steer an agent through them. Read a package's exemplars and voice skill before installing it from a repository you don't trust.
@@ -63,7 +64,7 @@ Benchmark agents run without permission prompts, and their workspaces contain un
 - each run has its own throwaway folder under `data/runs/`;
 - agents load only that folder's `.claude/` settings (`settingSources: ['project']`), never your personal Claude Code configuration, and no MCP servers;
 - `Read`, `Write`, `Edit`, `Glob` and `Grep` are refused for any path outside the workspace;
-- `Bash` (T2 only) runs in Claude Code's OS sandbox, which confines writes to the workspace and temporary folders;
+- `Bash` (T2 only) runs in Claude Code's OS sandbox, which confines writes to the workspace and temporary folders. If the sandbox can't start (on Linux it needs `bubblewrap` and `socat`), the run fails instead of running Bash unsandboxed;
 - agents get a minimal environment: `PATH`, `HOME`, locale, proxy settings and Claude credentials, not the rest of your shell.
 
 What remains:

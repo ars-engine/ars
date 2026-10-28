@@ -115,7 +115,8 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRunOutput> {
         settingSources: ['project'],
         env: agentEnv(),
         hooks: { PreToolUse: [{ matcher: 'Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep', hooks: [confineToWorkspace(root)] }] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
+        // failIfUnavailable: with no sandbox (e.g. no bubblewrap on Linux) the run fails instead of running Bash unsandboxed.
+        sandbox: { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
         mcpServers: {},
         strictMcpConfig: true,
         abortController,
@@ -152,5 +153,6 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRunOutput> {
   } finally {
     writeFileSync(o.transcriptPath, JSON.stringify(transcript, null, 1));
   }
+  if (error && /sandbox/i.test(error)) error = `Bash sandboxing is unavailable, so the run was refused. On Linux, install bubblewrap and socat. (${error})`;
   return { usage, skillsLoaded: [...skillsLoaded].filter(Boolean), error };
 }

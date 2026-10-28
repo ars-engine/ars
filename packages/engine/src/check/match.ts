@@ -1,3 +1,4 @@
+import { createContext, Script } from 'node:vm';
 import type { Check, Value } from '../core/types.ts';
 
 /** Does one observed value satisfy a feature check? Shared by miner, checker and self-test. */
@@ -26,6 +27,26 @@ export function patternRegex(source: string): RegExp | undefined {
     return new RegExp(source, 'm');
   } catch {
     return undefined;
+  }
+}
+
+const regexContext = createContext({ re: /$^/, text: '' });
+const regexTest = new Script('re.test(text)');
+
+/**
+ * Test a pattern rule against one file with a time limit. The vetting in patternRegex is a
+ * heuristic and misses patterns such as (a|a)+$, so every match runs under a vm timeout, which
+ * interrupts a backtracking regex. Returns undefined when the limit is hit: callers drop the rule.
+ */
+export function testPattern(re: RegExp, text: string, timeoutMs = 50): boolean | undefined {
+  regexContext.re = re;
+  regexContext.text = text;
+  try {
+    return regexTest.runInContext(regexContext, { timeout: timeoutMs }) as boolean;
+  } catch {
+    return undefined;
+  } finally {
+    regexContext.text = '';
   }
 }
 
