@@ -1,11 +1,15 @@
 import { diffLines } from 'diff';
+import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as prettier from 'prettier';
 import type { FormatOptions, FormattingProfile } from '../core/types.ts';
 
 /**
- * L1 formatting. If the repo has a Prettier config we use it; otherwise we infer one by
+ * L1 formatting. If the repo has a static Prettier config we use it; otherwise we infer one by
  * searching the option space for the config that reproduces the source with the fewest changed lines.
+ *
+ * Analyzed repos are untrusted, so Prettier never loads their config itself: a JS config or a plugin
+ * would run the repo's code. We parse static configs ourselves and keep only the options we learn.
  */
 
 const SEARCH_SPACE: Record<string, (string | number | boolean)[]> = {
@@ -23,13 +27,62 @@ const SEARCH_SPACE: Record<string, (string | number | boolean)[]> = {
 
 const DEFAULTS: FormatOptions = Object.fromEntries(Object.entries(SEARCH_SPACE).map(([k, v]) => [k, v[0]]));
 const FORMATTABLE = /\.[cm]?[jt]sx?$/;
-const CONFIG_FILE = /(^|\/)(\.prettierrc(\.(json|ya?ml|js|cjs|mjs|toml))?|prettier\.config\.[cm]?js)$/;
+const STATIC_CONFIGS = ['.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml', '.prettierrc.toml'];
 
 export const isFormattable = (path: string) => FORMATTABLE.test(path);
 
+/** Keep only the options ARS learns, as plain values: never plugins, overrides or parser settings. */
+export function safeOptions(options: Record<string, unknown>): FormatOptions {
+  return Object.fromEntries(
+    Object.entries(options).filter(([k, v]) => k in SEARCH_SPACE && ['string', 'number', 'boolean'].includes(typeof v)),
+  ) as FormatOptions;
+}
+
+/** Top-level `key: value` (YAML) or `key = value` (TOML) pairs; nested sections are ignored. */
+function parseFlatConfig(text: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const line of text.split('\n')) {
+    if (/^\s*\[/.test(line)) break;
+    const m = line.match(/^([A-Za-z]+)\s*[:=]\s*(.+?)\s*$/);
+    if (!m) continue;
+    const raw = m[2].replace(/\s+#.*$/, '');
+    out[m[1]] = raw === 'true' ? true : raw === 'false' ? false : /^\d+$/.test(raw) ? Number(raw) : raw.replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return out;
+}
+
+/** A regular file at the repo root, never a symlink, and small. */
+function readRootFile(root: string, name: string): string | undefined {
+  try {
+    const stat = lstatSync(join(root, name));
+    return stat.isFile() && stat.size < 64_000 ? readFileSync(join(root, name), 'utf8') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function staticConfig(root: string, texts: Map<string, string>): Record<string, unknown> | undefined {
+  for (const name of STATIC_CONFIGS) {
+    const text = readRootFile(root, name);
+    if (text === undefined) continue;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return parseFlatConfig(text);
+    }
+  }
+  try {
+    const key = JSON.parse(texts.get('package.json') ?? '{}').prettier;
+    // A string here names a shared config package, which would have to be imported: skip it.
+    return key && typeof key === 'object' ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function changedLines(text: string, filepath: string, options: FormatOptions): Promise<number> {
   try {
-    const out = await prettier.format(text, { ...options, filepath });
+    const out = await prettier.format(text, { ...safeOptions(options), filepath });
     return diffLines(text, out).reduce((n, part) => n + (part.added || part.removed ? part.count ?? 0 : 0), 0);
   } catch {
     return Number.MAX_SAFE_INTEGER / 1000;
@@ -51,18 +104,14 @@ function pickSamples(texts: Map<string, string>, max = 12): [string, string][] {
     .map(([p, t]) => [p, t.split('\n').slice(0, 400).join('\n')]);
 }
 
-async function repoConfig(root: string, texts: Map<string, string>): Promise<FormatOptions | undefined> {
-  const hasConfig = [...texts.keys()].some((p) => CONFIG_FILE.test(p))
-    || /"prettier"\s*:/.test(texts.get('package.json') ?? '');
-  if (!hasConfig) return undefined;
-  const sample = [...texts.keys()].find(isFormattable);
-  const config = sample ? await prettier.resolveConfig(join(root, sample)).catch(() => null) : null;
-  return config ? { ...DEFAULTS, ...(config as FormatOptions) } : undefined;
+function repoConfig(root: string, texts: Map<string, string>): FormatOptions | undefined {
+  const options = safeOptions(staticConfig(root, texts) ?? {});
+  return Object.keys(options).length ? { ...DEFAULTS, ...options } : undefined;
 }
 
 export async function inferFormatting(root: string, texts: Map<string, string>): Promise<FormattingProfile> {
   const samples = pickSamples(texts);
-  const fromRepo = await repoConfig(root, texts);
+  const fromRepo = repoConfig(root, texts);
   let options = fromRepo ?? { ...DEFAULTS };
   if (!fromRepo && samples.length) {
     let best = await score(samples, options);
@@ -94,7 +143,8 @@ export async function inferFormatting(root: string, texts: Map<string, string>):
 }
 
 export async function formatText(text: string, filepath: string, options: FormatOptions): Promise<string> {
-  return prettier.format(text, { ...options, filepath });
+  // Also filters options from rules.json files generated before this check existed.
+  return prettier.format(text, { ...safeOptions(options), filepath });
 }
 
 export async function isFormatted(text: string, filepath: string, options: FormatOptions): Promise<boolean> {

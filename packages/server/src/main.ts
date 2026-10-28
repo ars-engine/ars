@@ -2,13 +2,14 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import {
   AGENT_MODEL, analyzeProfile, bulkApprove, cancelJob, createExperiment, createProfile, currentAnalysis, currentConventions,
   DATA_DIR, decide, describeChange, describeFormatting, diagnoseExperiment, dismissProposal, estimateCost, experimentsOf, facts,
   gateProposal, generateSkills, getJob, getProfile, installPackage, LAYERS, list, listJobs, llmConfigured, MODELS, mustGet,
-  onJob, pipelineStatus, promoteProposal, proposalsOf, publishSkill, put, readSource, recategorize, remineProfile, reviewAccuracy,
+  onJob, pipelineStatus, promoteProposal, proposalsOf, publishSkill, put, readSource, recategorize, remineProfile, resolveInside, reviewAccuracy,
   reviewQueue, runsOf, skillVersions, TASKS, touchProfile,
   type ExperimentConfig, type Job, type Profile, type Run, type SkillVersion, type Vote,
 } from '@ars/engine';
@@ -20,12 +21,38 @@ const PORT = Number(process.env.PORT ?? 4317);
 
 app.onError((err, c) => c.json({ error: err.message }, 400));
 
+// ── access control ────────────────────────────────────────────────────
+// Listening on 127.0.0.1 is not enough: any web page can send requests to loopback, and DNS rebinding
+// can make a page's own host name resolve here. Only the ARS UI may use the API.
+const SESSION_TOKEN = randomBytes(32).toString('hex');
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+const sameToken = (given: string | undefined) =>
+  !!given && given.length === SESSION_TOKEN.length && timingSafeEqual(Buffer.from(given), Buffer.from(SESSION_TOKEN));
+
+app.use('/api/*', async (c, next) => {
+  if (!LOOPBACK_HOST.test(c.req.header('host') ?? '')) return c.json({ error: 'Forbidden host' }, 403);
+  const origin = c.req.header('origin');
+  if (origin && !LOOPBACK_ORIGIN.test(origin)) return c.json({ error: 'Forbidden origin' }, 403);
+  if (c.req.header('sec-fetch-site') === 'cross-site') return c.json({ error: 'Forbidden' }, 403);
+  // The UI fetches the token here. Another site can't read the reply (no CORS headers), and the Host
+  // check above stops DNS rebinding.
+  if (c.req.path === '/api/session' && c.req.method === 'GET') return c.json({ token: SESSION_TOKEN });
+  // EventSource can't set headers, so streams pass the token in the query string.
+  if (!sameToken(c.req.header('x-ars-token') ?? c.req.query('token'))) return c.json({ error: 'Missing or invalid session token' }, 401);
+  if (c.req.method !== 'GET' && !c.req.header('content-type')?.startsWith('application/json')) {
+    return c.json({ error: 'Requests must be application/json' }, 415);
+  }
+  await next();
+});
+
 const body = async <T>(c: { req: { json: () => Promise<unknown> } }) => ((await c.req.json().catch(() => ({}))) ?? {}) as T;
 
-/** Resolve a path inside a root folder; refuse anything that escapes it. */
+/** Read a file inside a root folder; refuse anything that escapes it, including through symlinks. */
 function safeRead(root: string, rel: string): string {
-  const abs = resolve(root, rel);
-  if (relative(root, abs).startsWith('..') || !existsSync(abs) || !statSync(abs).isFile()) throw new Error(`File not found: ${rel}`);
+  const abs = resolveInside(root, rel);
+  if (!abs || !statSync(abs).isFile()) throw new Error(`File not found: ${rel}`);
   return readFileSync(abs, 'utf8');
 }
 

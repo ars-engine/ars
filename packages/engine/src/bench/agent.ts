@@ -1,8 +1,68 @@
-import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { writeFileSync } from 'node:fs';
+import { query, type HookCallback, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { RunResult } from '../core/entities.ts';
+import { isInside } from '../core/paths.ts';
 
-/** Headless Claude Code run in an isolated folder. Identical options for every condition. */
+/**
+ * Headless Claude Code run in an isolated folder. Identical options for every condition.
+ *
+ * Workspaces hold untrusted text (a copy of the analyzed repo for T1, exemplars for T2) that could
+ * steer the agent, and runs skip permission prompts. So:
+ * - file tools are refused for any path outside the workspace (PreToolUse hook below);
+ * - Bash (T2 only) runs in Claude Code's OS sandbox, which confines writes to the workspace;
+ * - the agent gets a minimal environment, not the user's whole shell;
+ * - no MCP servers are loaded, whatever files the workspace contains.
+ */
+
+/** Variables the agent needs to run and authenticate. Everything else in the user's shell stays out. */
+const AGENT_ENV_KEYS = [
+  'PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM',
+  'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS',
+];
+const agentEnv = () => Object.fromEntries(AGENT_ENV_KEYS.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+
+/** The real path a tool would touch, following symlinks for the part of the path that exists. */
+function realTarget(root: string, p: string): string {
+  let cur = resolve(root, p);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...rest.reverse());
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return resolve(root, p);
+      rest.push(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/** The first path-like tool argument that points outside the workspace, if any. */
+function outsideWorkspace(root: string, input: Record<string, unknown>): string | undefined {
+  for (const key of ['file_path', 'path', 'notebook_path']) {
+    const v = input[key];
+    if (typeof v === 'string' && v && !isInside(root, realTarget(root, v))) return v;
+  }
+  for (const key of ['pattern', 'glob']) {
+    const v = input[key];
+    if (typeof v === 'string' && /^[/~]|(^|\/)\.\.(\/|$)/.test(v)) return v;
+  }
+  return undefined;
+}
+
+const confineToWorkspace = (root: string): HookCallback => async (input) => {
+  const toolInput = ((input as { tool_input?: unknown }).tool_input ?? {}) as Record<string, unknown>;
+  const outside = outsideWorkspace(root, toolInput);
+  if (!outside) return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `This run may only use files inside its workspace; ${outside} is outside it.`,
+    },
+  };
+};
 
 export interface AgentRunOptions {
   cwd: string;
@@ -37,6 +97,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRunOutput> {
   if (o.signal?.aborted) abortController.abort();
   else o.signal?.addEventListener('abort', () => abortController.abort(), { once: true });
   const tools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', ...(o.allowBash ? ['Bash'] : [])];
+  const root = realpathSync(o.cwd);
 
   try {
     for await (const msg of query({
@@ -52,6 +113,12 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRunOutput> {
         allowDangerouslySkipPermissions: true,
         // Only the workspace's own .claude/ (skills + hooks) — never the user's personal config.
         settingSources: ['project'],
+        env: agentEnv(),
+        hooks: { PreToolUse: [{ matcher: 'Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep', hooks: [confineToWorkspace(root)] }] },
+        // failIfUnavailable: with no sandbox (e.g. no bubblewrap on Linux) the run fails instead of running Bash unsandboxed.
+        sandbox: { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
+        mcpServers: {},
+        strictMcpConfig: true,
         abortController,
       },
     })) {
@@ -86,5 +153,6 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRunOutput> {
   } finally {
     writeFileSync(o.transcriptPath, JSON.stringify(transcript, null, 1));
   }
+  if (error && /sandbox/i.test(error)) error = `Bash sandboxing is unavailable, so the run was refused. On Linux, install bubblewrap and socat. (${error})`;
   return { usage, skillsLoaded: [...skillsLoaded].filter(Boolean), error };
 }
