@@ -82,7 +82,9 @@ The short version follows. [Workflow](workflow.md) explains every screen.
 6. **Lab**: run a real experiment. A good first run is T1 + T2 + T3, all three conditions, 2 repeats.
 7. **Improve**: diagnose failing rules, gate the fixes, and promote the ones that pass.
 
-## 5. Use the skills in a real project
+## 5. Start a new project with your skills
+
+This is what ARS is for: create a new project (or open one), install the package, and ask Claude Code to build features. The skills guide it, and the edit hook keeps formatting and enforced rules on track.
 
 From **Skills → Install into a project**, or from the command line:
 

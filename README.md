@@ -4,7 +4,9 @@ ARS reads one of your projects, learns how **you** write code, packages that as 
 
 ARS currently supports **React projects written in TypeScript or JavaScript**. Other stacks (Python, Go, etc.) aren't supported yet.
 
-Skill generation is only the first step. The point is the feedback loop: every rule carries evidence from your code, can be checked automatically, is tested on unseen tasks against controls, and is improved only when the data says the change helps.
+The goal is to carry your style into new work. Install the skills into a new or existing project, and Claude Code builds it the way you would: your structure, your idioms, your conventions, from the first file.
+
+Skill generation is only the first step. Before you rely on the skills in new projects, ARS checks them: every rule carries evidence from your code, can be checked automatically, is tested on unseen tasks against controls, and is improved only when the data says the change helps.
 
 ![The ARS workspace: a profile's pipeline rail and its learned signature](docs/images/signature.png)
 
