@@ -1,6 +1,20 @@
 # Contributing to ARS
 
-Thanks for helping. This page covers setting up, making a change and opening a pull request.
+Thanks for helping. ARS is early, and collaborators are very welcome. This page covers where help is most wanted, setting up, making a change and opening a pull request.
+
+## Where help is wanted
+
+Today ARS supports React projects (TypeScript or JavaScript) and Claude Code. The goal is to support more languages and more coding agents. These are the areas where help makes the biggest difference:
+
+- **Feedback from real projects.** Run ARS on your own React project and open an issue where a learned rule is wrong, missing or too vague. You don't need to write code for this.
+- **New languages.** Deep analysis for Python, Go and others. See [Add a language analyzer](docs/extending.md#add-a-language-analyzer).
+- **New coding agents.** Codex and others, run in the same Lab as Claude Code so results can be compared side by side.
+- **Context window management.** Loading only the rules and examples a task needs.
+- **Git worktrees for agents.** Running several agents side by side on a real project.
+- **Better analysis.** New style dimensions and better rules. See [Add a style dimension](docs/extending.md#add-a-style-dimension).
+- **Automated tests and CI.** There's no test suite yet.
+
+For anything larger than a small fix, such as a new language or agent, **open an issue first** so we can agree on the approach before you write the code.
 
 ## Set up
 

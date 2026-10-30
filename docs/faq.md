@@ -53,7 +53,7 @@ Yes. ARS clones with your machine's own git credentials (SSH keys or a credentia
 
 React projects only, for now, written in TypeScript or JavaScript. Other stacks, such as Python or Go, aren't supported yet.
 
-ARS will still read other repositories, but it only takes an inventory of their languages, manifests, frameworks and imports, marked as shallow coverage. It learns few or no rules from them, and the Lab's tasks are React apps. To add a language, see [Extending ARS](extending.md#add-a-language-analyzer).
+ARS will still read other repositories, but it only takes an inventory of their languages, manifests, frameworks and imports, marked as shallow coverage. It learns few or no rules from them, and the Lab's tasks are React apps. More languages, and coding agents beyond Claude Code, are on the [roadmap](../README.md#roadmap). To add a language, see [Extending ARS](extending.md#add-a-language-analyzer), and open an issue first so we can agree on the approach.
 
 ## How do I start over?
 
